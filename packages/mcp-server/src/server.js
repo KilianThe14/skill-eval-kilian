@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 import express from "express";
+import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -36,6 +38,28 @@ function assertAllowedPath(inputPath) {
     throw new Error(`Path is outside allowed roots: ${resolved}`);
   }
   return resolved;
+}
+
+async function materializeSkill({ skillPath, skillMarkdown, skillName = "aily-inline-skill" }) {
+  if (skillMarkdown) {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "skill-eval-inline-"));
+    const skillDir = path.join(base, sanitizeName(skillName));
+    await fs.mkdir(skillDir, { recursive: true });
+    await fs.writeFile(path.join(skillDir, "SKILL.md"), skillMarkdown);
+    return skillDir;
+  }
+  if (!skillPath) throw new Error("Provide either skillPath or skillMarkdown.");
+  return assertAllowedPath(skillPath);
+}
+
+function sanitizeName(name) {
+  return String(name || "skill").replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-").slice(0, 80) || "skill";
+}
+
+async function readJsonInput({ filePath, value, label }) {
+  if (value) return value;
+  if (!filePath) throw new Error(`Provide either ${label}Path or ${label}.`);
+  return readJson(assertAllowedPath(filePath));
 }
 
 function resultPayload(value, summary = "ok") {
@@ -80,13 +104,15 @@ function createMcpServer(meta = {}) {
 
   server.registerTool("analyze_skill", {
     title: "Analyze Skill",
-    description: "Static skill-only evaluation. Does not evaluate plugins and does not score token budget.",
+    description: "Static skill-only evaluation. For Aily, prefer skillMarkdown instead of sandbox file paths.",
     inputSchema: {
-      skillPath: z.string().describe("Path to a skill directory containing SKILL.md."),
+      skillPath: z.string().optional().describe("Local server path to a skill directory containing SKILL.md."),
+      skillMarkdown: z.string().optional().describe("Inline SKILL.md content. Preferred when Aily has the file in its own sandbox."),
+      skillName: z.string().optional().describe("Name used when skillMarkdown is provided."),
       outputPath: z.string().optional().describe("Optional path to write full evaluation JSON."),
     },
-  }, async ({ skillPath, outputPath }) => {
-    const result = await analyzeSkill(assertAllowedPath(skillPath));
+  }, async ({ skillPath, skillMarkdown, skillName, outputPath }) => {
+    const result = await analyzeSkill(await materializeSkill({ skillPath, skillMarkdown, skillName }));
     if (outputPath) await writeJson(assertAllowedPath(outputPath), result);
     return resultPayload(result, `Analyzed skill ${result.target.name}. Score: ${result.summary.overallScore}. Risk: ${result.summary.riskLevel}.`);
   });
@@ -95,14 +121,16 @@ function createMcpServer(meta = {}) {
     title: "Initialize Skill Benchmark",
     description: "Create a starter benchmark with happy-path, follow-up, and boundary-case scenarios.",
     inputSchema: {
-      skillPath: z.string(),
+      skillPath: z.string().optional(),
+      skillMarkdown: z.string().optional().describe("Inline SKILL.md content. Preferred for Aily."),
+      skillName: z.string().optional(),
       runner: z.enum(["claude-code", "aily"]).default("aily"),
       workspacePath: z.string().optional(),
       command: z.string().optional(),
       outputPath: z.string().optional(),
     },
-  }, async ({ skillPath, runner, workspacePath, command, outputPath }) => {
-    const benchmark = createStarterBenchmark(assertAllowedPath(skillPath), {
+  }, async ({ skillPath, skillMarkdown, skillName, runner, workspacePath, command, outputPath }) => {
+    const benchmark = createStarterBenchmark(await materializeSkill({ skillPath, skillMarkdown, skillName }), {
       runner,
       workspace: workspacePath ? assertAllowedPath(workspacePath) : undefined,
       command,
@@ -115,11 +143,12 @@ function createMcpServer(meta = {}) {
     title: "Run Skill Benchmark",
     description: "Run benchmark through a CLI-command runner. Disabled unless SKILL_EVAL_MCP_ENABLE_RUNNER=true.",
     inputSchema: {
-      configPath: z.string(),
+      configPath: z.string().optional(),
+      benchmarkConfig: z.record(z.any()).optional().describe("Inline benchmark config JSON. Preferred for Aily."),
       runner: z.enum(["claude-code", "aily"]).default("aily"),
       outputPath: z.string().optional(),
     },
-  }, async ({ configPath, runner, outputPath }) => {
+  }, async ({ configPath, benchmarkConfig, runner, outputPath }) => {
     if (!ENABLE_RUNNER) {
       return resultPayload({
         blocked: true,
@@ -128,7 +157,10 @@ function createMcpServer(meta = {}) {
       }, "Benchmark execution is disabled. Enable SKILL_EVAL_MCP_ENABLE_RUNNER=true to run agent commands.");
     }
     const adapter = runner === "aily" ? new AilyRunner() : new ClaudeCodeRunner();
-    const result = await runBenchmark(assertAllowedPath(configPath), adapter);
+    const resolvedConfigPath = benchmarkConfig
+      ? await writeInlineBenchmarkConfig(benchmarkConfig)
+      : assertAllowedPath(configPath);
+    const result = await runBenchmark(resolvedConfigPath, adapter);
     if (outputPath) await writeJson(assertAllowedPath(outputPath), result);
     return resultPayload(result, `Benchmark complete. Score: ${result.summary.benchmarkScore}. Completed: ${result.summary.completed}/${result.summary.scenarioCount}.`);
   });
@@ -137,10 +169,11 @@ function createMcpServer(meta = {}) {
     title: "Score Benchmark Result",
     description: "Read a benchmark-run JSON and return its summary.",
     inputSchema: {
-      benchmarkRunPath: z.string(),
+      benchmarkRunPath: z.string().optional(),
+      benchmarkRun: z.record(z.any()).optional().describe("Inline benchmark-run JSON. Preferred for Aily."),
     },
-  }, async ({ benchmarkRunPath }) => {
-    const run = await readJson(assertAllowedPath(benchmarkRunPath));
+  }, async ({ benchmarkRunPath, benchmarkRun }) => {
+    const run = await readJsonInput({ filePath: benchmarkRunPath, value: benchmarkRun, label: "benchmarkRun" });
     return resultPayload(run.summary, `Benchmark score: ${run.summary?.benchmarkScore ?? "unknown"}.`);
   });
 
@@ -148,14 +181,16 @@ function createMcpServer(meta = {}) {
     title: "Compare Skill Versions",
     description: "Compare two skill evaluation JSON files.",
     inputSchema: {
-      beforePath: z.string(),
-      afterPath: z.string(),
+      beforePath: z.string().optional(),
+      afterPath: z.string().optional(),
+      beforeEvaluation: z.record(z.any()).optional().describe("Inline before evaluation JSON."),
+      afterEvaluation: z.record(z.any()).optional().describe("Inline after evaluation JSON."),
       outputPath: z.string().optional(),
     },
-  }, async ({ beforePath, afterPath, outputPath }) => {
+  }, async ({ beforePath, afterPath, beforeEvaluation, afterEvaluation, outputPath }) => {
     const report = compareEvaluations(
-      await readJson(assertAllowedPath(beforePath)),
-      await readJson(assertAllowedPath(afterPath)),
+      await readJsonInput({ filePath: beforePath, value: beforeEvaluation, label: "beforeEvaluation" }),
+      await readJsonInput({ filePath: afterPath, value: afterEvaluation, label: "afterEvaluation" }),
     );
     if (outputPath) await writeJson(assertAllowedPath(outputPath), report);
     return resultPayload(report, `Compare complete. Delta: ${report.delta.overallScore}.`);
@@ -165,11 +200,12 @@ function createMcpServer(meta = {}) {
     title: "Suggest Skill Improvements",
     description: "Generate an improvement brief from an evaluation result.",
     inputSchema: {
-      evaluationResultPath: z.string(),
+      evaluationResultPath: z.string().optional(),
+      evaluationResult: z.record(z.any()).optional().describe("Inline evaluation result JSON. Preferred for Aily."),
       outputPath: z.string().optional(),
     },
-  }, async ({ evaluationResultPath, outputPath }) => {
-    const brief = buildImprovementBrief(await readJson(assertAllowedPath(evaluationResultPath)));
+  }, async ({ evaluationResultPath, evaluationResult, outputPath }) => {
+    const brief = buildImprovementBrief(await readJsonInput({ filePath: evaluationResultPath, value: evaluationResult, label: "evaluationResult" }));
     if (outputPath) await writeJson(assertAllowedPath(outputPath), brief);
     return resultPayload(brief, `Improvement brief generated for ${brief.target.name}.`);
   });
@@ -178,13 +214,15 @@ function createMcpServer(meta = {}) {
     title: "Generate Review Packet",
     description: "Generate a PM-readable review packet from evaluation and optional benchmark evidence.",
     inputSchema: {
-      evaluationResultPath: z.string(),
+      evaluationResultPath: z.string().optional(),
+      evaluationResult: z.record(z.any()).optional().describe("Inline evaluation result JSON. Preferred for Aily."),
       benchmarkRunPath: z.string().optional(),
+      benchmarkRun: z.record(z.any()).optional().describe("Inline benchmark-run JSON."),
       outputPath: z.string().optional(),
     },
-  }, async ({ evaluationResultPath, benchmarkRunPath, outputPath }) => {
-    const evaluation = await readJson(assertAllowedPath(evaluationResultPath));
-    const benchmark = benchmarkRunPath ? await readJson(assertAllowedPath(benchmarkRunPath)) : null;
+  }, async ({ evaluationResultPath, evaluationResult, benchmarkRunPath, benchmarkRun, outputPath }) => {
+    const evaluation = await readJsonInput({ filePath: evaluationResultPath, value: evaluationResult, label: "evaluationResult" });
+    const benchmark = benchmarkRun || (benchmarkRunPath ? await readJson(assertAllowedPath(benchmarkRunPath)) : null);
     const packet = renderReviewPacket(evaluation, benchmark);
     if (outputPath) {
       const { writeText } = await import("../../core/src/index.js");
@@ -194,6 +232,13 @@ function createMcpServer(meta = {}) {
   });
 
   return server;
+}
+
+async function writeInlineBenchmarkConfig(config) {
+  const base = await fs.mkdtemp(path.join(os.tmpdir(), "skill-eval-inline-benchmark-"));
+  const configPath = path.join(base, "benchmark.json");
+  await writeJson(configPath, config);
+  return configPath;
 }
 
 app.get("/health", (_req, res) => {

@@ -45,6 +45,28 @@ test("MCP SSE server lists and executes skill tools", async () => {
       },
     });
     assert.equal(result.structuredContent.summary.overallScore, 100);
+    const inlineResult = await client.callTool({
+      name: "analyze_skill",
+      arguments: {
+        skillName: "inline-sample",
+        skillMarkdown: `---
+name: inline-sample
+description: Use when testing inline Aily skill evaluation.
+---
+
+## Workflow
+1. Check the request.
+2. Execute the scoped task.
+
+## Boundaries
+Do not handle unrelated work.
+
+## Verification
+Verify the final output before responding.
+`,
+      },
+    });
+    assert.equal(inlineResult.structuredContent.target.name, "inline-sample");
     await client.close();
   } finally {
     child.kill("SIGTERM");

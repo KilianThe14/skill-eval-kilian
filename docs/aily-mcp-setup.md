@@ -32,6 +32,24 @@ npm run mcp:sse
 - 返回内容会压缩，避免超过 Aily 上下文。
 - 服务会读取 Aily header：`x-aily-user`、`x-aily-email`，用于审计和后续鉴权。
 
+## Aily 路径限制
+
+Aily 附件和工作区路径类似 `/home/gem/.aily/...`，这些路径在 Aily 沙箱内，不在 MCP server 所在机器上。MCP server 如果部署在本机或云服务器，不能直接读取这些路径。
+
+在 Aily 中调用时优先传内联内容：
+
+| Tool | Aily 推荐参数 |
+| --- | --- |
+| `analyze_skill` | `skillMarkdown` + `skillName` |
+| `init_skill_benchmark` | `skillMarkdown` + `skillName` |
+| `run_skill_benchmark` | `benchmarkConfig` |
+| `score_benchmark_result` | `benchmarkRun` |
+| `compare_skill_versions` | `beforeEvaluation` + `afterEvaluation` |
+| `suggest_skill_improvements` | `evaluationResult` |
+| `generate_review_packet` | `evaluationResult` + optional `benchmarkRun` |
+
+只在 MCP server 能访问同一块文件系统时使用 `skillPath`、`configPath`、`evaluationResultPath` 这类路径参数。
+
 ## 暴露的 MCP tools
 
 | Tool | 作用 |
