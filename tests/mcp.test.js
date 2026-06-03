@@ -45,6 +45,7 @@ test("MCP SSE server lists and executes skill tools", async () => {
       },
     });
     assert.equal(result.structuredContent.summary.overallScore, 100);
+    assert.match(result.content[0].text, /JSON_RESULT:/);
     const inlineResult = await client.callTool({
       name: "analyze_skill",
       arguments: {
@@ -67,6 +68,32 @@ Verify the final output before responding.
       },
     });
     assert.equal(inlineResult.structuredContent.target.name, "inline-sample");
+    const benchmarkResult = await client.callTool({
+      name: "init_skill_benchmark",
+      arguments: {
+        skillName: "inline-sample",
+        skillMarkdown: `---
+name: inline-sample
+description: Use when testing inline benchmark creation.
+---
+
+## Workflow
+Run a scoped task.
+
+## Boundaries
+Do not overreach.
+
+## Verification
+Check the result.
+`,
+        outputPath: "/home/gem/.aily/workdir/benchmark.json",
+      },
+    });
+    assert.equal(benchmarkResult.structuredContent.scenarios.length, 3);
+    assert.match(benchmarkResult.content[0].text, /OUTPUT_PATH_STATUS:/);
+    assert.match(benchmarkResult.content[0].text, /"written": false/);
+    assert.match(benchmarkResult.content[0].text, /JSON_RESULT:/);
+    assert.match(benchmarkResult.content[0].text, /"kind": "skill-eval-benchmark"/);
     await client.close();
   } finally {
     child.kill("SIGTERM");

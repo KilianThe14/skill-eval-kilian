@@ -29,6 +29,7 @@ npm run mcp:sse
 - `run_skill_benchmark` 默认禁用真实执行。
 - 只有设置 `SKILL_EVAL_MCP_ENABLE_RUNNER=true` 才能执行 runner command。
 - 所有文件路径必须位于 `SKILL_EVAL_ALLOWED_ROOTS` 内。
+- `outputPath` 只适合写 MCP server 所在机器的本地路径；Aily 沙箱路径不会让工具失败，但会返回 `OUTPUT_PATH_STATUS.written=false`。
 - 返回内容会压缩，避免超过 Aily 上下文。
 - 服务会读取 Aily header：`x-aily-user`、`x-aily-email`，用于审计和后续鉴权。
 
@@ -49,6 +50,12 @@ Aily 附件和工作区路径类似 `/home/gem/.aily/...`，这些路径在 Aily
 | `generate_review_packet` | `evaluationResult` + optional `benchmarkRun` |
 
 只在 MCP server 能访问同一块文件系统时使用 `skillPath`、`configPath`、`evaluationResultPath` 这类路径参数。
+
+MCP 返回格式：
+
+- `content.text` 会包含摘要、可选的 `OUTPUT_PATH_STATUS`、以及 `JSON_RESULT`。
+- Aily 后续调用应直接读取 `JSON_RESULT`，再作为 `benchmarkConfig`、`evaluationResult` 或 `benchmarkRun` 传给下一步。
+- 不要依赖 Aily 读取 `outputPath` 写出的文件，除非 MCP server 和 Aily 共享同一文件系统。
 
 ## 暴露的 MCP tools
 

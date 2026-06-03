@@ -23,6 +23,7 @@ import { AilyRunner } from "../../runner-aily/src/index.js";
 const PORT = Number(process.env.PORT || process.env.SKILL_EVAL_MCP_PORT || 3000);
 const HOST = process.env.HOST || process.env.SKILL_EVAL_MCP_HOST || "0.0.0.0";
 const ENABLE_RUNNER = process.env.SKILL_EVAL_MCP_ENABLE_RUNNER === "true";
+const CONTENT_TEXT_JSON_LIMIT = 20000;
 const ALLOWED_ROOTS = (process.env.SKILL_EVAL_ALLOWED_ROOTS || process.cwd())
   .split(",")
   .map((root) => path.resolve(root.trim()))
@@ -62,17 +63,62 @@ async function readJsonInput({ filePath, value, label }) {
   return readJson(assertAllowedPath(filePath));
 }
 
-function resultPayload(value, summary = "ok") {
+async function tryWriteJson(outputPath, value) {
+  if (!outputPath) return null;
+  try {
+    const resolved = assertAllowedPath(outputPath);
+    await writeJson(resolved, value);
+    return { requested: true, written: true, path: resolved };
+  } catch (error) {
+    return outputPathWarning(outputPath, error);
+  }
+}
+
+async function tryWriteText(outputPath, value) {
+  if (!outputPath) return null;
+  try {
+    const { writeText } = await import("../../core/src/index.js");
+    const resolved = assertAllowedPath(outputPath);
+    await writeText(resolved, value);
+    return { requested: true, written: true, path: resolved };
+  } catch (error) {
+    return outputPathWarning(outputPath, error);
+  }
+}
+
+function outputPathWarning(outputPath, error) {
+  return {
+    requested: true,
+    written: false,
+    path: outputPath,
+    error: error instanceof Error ? error.message : String(error),
+    guidance: "Aily sandbox paths are not writable by this MCP server. Use the JSON_RESULT returned in content.text, or choose a path inside SKILL_EVAL_ALLOWED_ROOTS.",
+  };
+}
+
+function resultPayload(value, summary = "ok", outputPathStatus = null) {
   const compact = compactValue(value);
   return {
     structuredContent: compact,
     content: [
       {
         type: "text",
-        text: typeof summary === "string" ? summary : JSON.stringify(summary, null, 2),
+        text: formatContentText(summary, compact, outputPathStatus),
       },
     ],
   };
+}
+
+function formatContentText(summary, value, outputPathStatus) {
+  const summaryText = typeof summary === "string" ? summary : JSON.stringify(summary, null, 2);
+  const outputText = outputPathStatus
+    ? `\n\nOUTPUT_PATH_STATUS:\n${JSON.stringify(outputPathStatus, null, 2)}`
+    : "";
+  const json = JSON.stringify(value, null, 2);
+  if (json.length <= CONTENT_TEXT_JSON_LIMIT) {
+    return `${summaryText}${outputText}\n\nJSON_RESULT:\n${json}`;
+  }
+  return `${summaryText}${outputText}\n\nJSON_RESULT_TRUNCATED:\n${json.slice(0, CONTENT_TEXT_JSON_LIMIT)}\n...`;
 }
 
 function compactValue(value) {
@@ -109,12 +155,12 @@ function createMcpServer(meta = {}) {
       skillPath: z.string().optional().describe("Local server path to a skill directory containing SKILL.md."),
       skillMarkdown: z.string().optional().describe("Inline SKILL.md content. Preferred when Aily has the file in its own sandbox."),
       skillName: z.string().optional().describe("Name used when skillMarkdown is provided."),
-      outputPath: z.string().optional().describe("Optional path to write full evaluation JSON."),
+      outputPath: z.string().optional().describe("Optional local server path to write full evaluation JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ skillPath, skillMarkdown, skillName, outputPath }) => {
     const result = await analyzeSkill(await materializeSkill({ skillPath, skillMarkdown, skillName }));
-    if (outputPath) await writeJson(assertAllowedPath(outputPath), result);
-    return resultPayload(result, `Analyzed skill ${result.target.name}. Score: ${result.summary.overallScore}. Risk: ${result.summary.riskLevel}.`);
+    const outputPathStatus = await tryWriteJson(outputPath, result);
+    return resultPayload(result, `Analyzed skill ${result.target.name}. Score: ${result.summary.overallScore}. Risk: ${result.summary.riskLevel}.`, outputPathStatus);
   });
 
   server.registerTool("init_skill_benchmark", {
@@ -127,7 +173,7 @@ function createMcpServer(meta = {}) {
       runner: z.enum(["claude-code", "aily"]).default("aily"),
       workspacePath: z.string().optional(),
       command: z.string().optional(),
-      outputPath: z.string().optional(),
+      outputPath: z.string().optional().describe("Optional local server path to write benchmark JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ skillPath, skillMarkdown, skillName, runner, workspacePath, command, outputPath }) => {
     const benchmark = createStarterBenchmark(await materializeSkill({ skillPath, skillMarkdown, skillName }), {
@@ -135,8 +181,8 @@ function createMcpServer(meta = {}) {
       workspace: workspacePath ? assertAllowedPath(workspacePath) : undefined,
       command,
     });
-    if (outputPath) await writeJson(assertAllowedPath(outputPath), benchmark);
-    return resultPayload(benchmark, `Created benchmark for ${benchmark.target.name} with ${benchmark.scenarios.length} starter scenarios.`);
+    const outputPathStatus = await tryWriteJson(outputPath, benchmark);
+    return resultPayload(benchmark, `Created benchmark for ${benchmark.target.name} with ${benchmark.scenarios.length} starter scenarios.`, outputPathStatus);
   });
 
   server.registerTool("run_skill_benchmark", {
@@ -146,7 +192,7 @@ function createMcpServer(meta = {}) {
       configPath: z.string().optional(),
       benchmarkConfig: z.record(z.any()).optional().describe("Inline benchmark config JSON. Preferred for Aily."),
       runner: z.enum(["claude-code", "aily"]).default("aily"),
-      outputPath: z.string().optional(),
+      outputPath: z.string().optional().describe("Optional local server path to write benchmark run JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ configPath, benchmarkConfig, runner, outputPath }) => {
     if (!ENABLE_RUNNER) {
@@ -161,8 +207,8 @@ function createMcpServer(meta = {}) {
       ? await writeInlineBenchmarkConfig(benchmarkConfig)
       : assertAllowedPath(configPath);
     const result = await runBenchmark(resolvedConfigPath, adapter);
-    if (outputPath) await writeJson(assertAllowedPath(outputPath), result);
-    return resultPayload(result, `Benchmark complete. Score: ${result.summary.benchmarkScore}. Completed: ${result.summary.completed}/${result.summary.scenarioCount}.`);
+    const outputPathStatus = await tryWriteJson(outputPath, result);
+    return resultPayload(result, `Benchmark complete. Score: ${result.summary.benchmarkScore}. Completed: ${result.summary.completed}/${result.summary.scenarioCount}.`, outputPathStatus);
   });
 
   server.registerTool("score_benchmark_result", {
@@ -185,15 +231,15 @@ function createMcpServer(meta = {}) {
       afterPath: z.string().optional(),
       beforeEvaluation: z.record(z.any()).optional().describe("Inline before evaluation JSON."),
       afterEvaluation: z.record(z.any()).optional().describe("Inline after evaluation JSON."),
-      outputPath: z.string().optional(),
+      outputPath: z.string().optional().describe("Optional local server path to write compare JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ beforePath, afterPath, beforeEvaluation, afterEvaluation, outputPath }) => {
     const report = compareEvaluations(
       await readJsonInput({ filePath: beforePath, value: beforeEvaluation, label: "beforeEvaluation" }),
       await readJsonInput({ filePath: afterPath, value: afterEvaluation, label: "afterEvaluation" }),
     );
-    if (outputPath) await writeJson(assertAllowedPath(outputPath), report);
-    return resultPayload(report, `Compare complete. Delta: ${report.delta.overallScore}.`);
+    const outputPathStatus = await tryWriteJson(outputPath, report);
+    return resultPayload(report, `Compare complete. Delta: ${report.delta.overallScore}.`, outputPathStatus);
   });
 
   server.registerTool("suggest_skill_improvements", {
@@ -202,12 +248,12 @@ function createMcpServer(meta = {}) {
     inputSchema: {
       evaluationResultPath: z.string().optional(),
       evaluationResult: z.record(z.any()).optional().describe("Inline evaluation result JSON. Preferred for Aily."),
-      outputPath: z.string().optional(),
+      outputPath: z.string().optional().describe("Optional local server path to write improvement JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ evaluationResultPath, evaluationResult, outputPath }) => {
     const brief = buildImprovementBrief(await readJsonInput({ filePath: evaluationResultPath, value: evaluationResult, label: "evaluationResult" }));
-    if (outputPath) await writeJson(assertAllowedPath(outputPath), brief);
-    return resultPayload(brief, `Improvement brief generated for ${brief.target.name}.`);
+    const outputPathStatus = await tryWriteJson(outputPath, brief);
+    return resultPayload(brief, `Improvement brief generated for ${brief.target.name}.`, outputPathStatus);
   });
 
   server.registerTool("generate_review_packet", {
@@ -218,17 +264,14 @@ function createMcpServer(meta = {}) {
       evaluationResult: z.record(z.any()).optional().describe("Inline evaluation result JSON. Preferred for Aily."),
       benchmarkRunPath: z.string().optional(),
       benchmarkRun: z.record(z.any()).optional().describe("Inline benchmark-run JSON."),
-      outputPath: z.string().optional(),
+      outputPath: z.string().optional().describe("Optional local server path to write review packet markdown. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ evaluationResultPath, evaluationResult, benchmarkRunPath, benchmarkRun, outputPath }) => {
     const evaluation = await readJsonInput({ filePath: evaluationResultPath, value: evaluationResult, label: "evaluationResult" });
     const benchmark = benchmarkRun || (benchmarkRunPath ? await readJson(assertAllowedPath(benchmarkRunPath)) : null);
     const packet = renderReviewPacket(evaluation, benchmark);
-    if (outputPath) {
-      const { writeText } = await import("../../core/src/index.js");
-      await writeText(assertAllowedPath(outputPath), packet);
-    }
-    return resultPayload({ packet, user: meta }, "Review packet generated.");
+    const outputPathStatus = await tryWriteText(outputPath, packet);
+    return resultPayload({ packet, user: meta }, "Review packet generated.", outputPathStatus);
   });
 
   return server;
