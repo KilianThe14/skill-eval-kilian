@@ -37,6 +37,23 @@ skill-eval improve <result.json>
 skill-eval review-packet <result.json> <benchmark-run.json>
 ```
 
+## Aily Custom MCP
+
+Start the SSE MCP server:
+
+```bash
+npm run mcp:sse
+```
+
+Aily custom MCP form:
+
+- Name: `Skill Eval Kilian`
+- Description: `Evaluate agent skills, generate and run skill benchmarks, compare versions, and generate review packets.`
+- URL: `https://<your-domain>/sse`
+- Transport: `SSE`
+
+See `docs/aily-mcp-setup.md`.
+
 ## Repository Status
 
 This repository is designed to be public. See `docs/source-inventory.md` and `docs/migration-map.md` for the migration boundary from `openai/plugins/plugins/plugin-eval`.

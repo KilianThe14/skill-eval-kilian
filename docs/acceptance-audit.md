@@ -43,6 +43,21 @@ Date: 2026-06-03
 - [x] Aily full capability interface is documented in `docs/aily-full-capability-interface.md`.
 - [x] Aily runner exposes full capability fields in telemetry/result shape.
 
+## Aily MCP
+
+- [x] SSE MCP server implemented in `packages/mcp-server`.
+- [x] MCP endpoint is `/sse`.
+- [x] MCP message endpoint is `/messages`.
+- [x] MCP server reads `x-aily-user` and `x-aily-email`.
+- [x] MCP server exposes `analyze_skill`.
+- [x] MCP server exposes `init_skill_benchmark`.
+- [x] MCP server exposes `run_skill_benchmark`.
+- [x] MCP server exposes `score_benchmark_result`.
+- [x] MCP server exposes `compare_skill_versions`.
+- [x] MCP server exposes `suggest_skill_improvements`.
+- [x] MCP server exposes `generate_review_packet`.
+- [x] Aily setup guide exists in `docs/aily-mcp-setup.md`.
+
 ## Adapters
 
 - [x] Claude Code skill wrapper exists in `packages/adapter-claude-code/skill-eval`.
@@ -68,6 +83,7 @@ Date: 2026-06-03
 - [x] Claude Code runner path verified through CLI command runner in tests.
 - [x] Aily runner path verified through CLI command runner with shared result schema.
 - [x] GitHub repo visibility verified as `PUBLIC`.
+- [x] MCP SSE server verified with SDK client.
 
 ## External Platform Binding Note
 
