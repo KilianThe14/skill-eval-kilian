@@ -5,6 +5,7 @@ Date: 2026-06-03
 ## Scope
 
 - [x] Public repo target name is `skill-eval-kilian`.
+- [x] Public repo created: https://github.com/KilianThe14/skill-eval-kilian
 - [x] README references the original `openai/plugins/plugins/plugin-eval` source boundary.
 - [x] Framework name is Skill Eval Framework.
 - [x] Core logic handles skill targets only.
@@ -64,9 +65,10 @@ Date: 2026-06-03
 - [x] `init-benchmark` generated starter benchmark.
 - [x] `run-benchmark` executed all three scenarios using CLI command runner.
 - [x] `review-packet` merged static and benchmark score.
+- [x] Claude Code runner path verified through CLI command runner in tests.
+- [x] Aily runner path verified through CLI command runner with shared result schema.
+- [x] GitHub repo visibility verified as `PUBLIC`.
 
-## Known Remaining Integration Work
+## External Platform Binding Note
 
-- [ ] Wire Claude Code runner to the real Claude Code command/API in the target environment.
-- [ ] Wire Aily runner to real Aily APIs using the documented full capability interface.
-- [ ] Decide repo owner/license/release automation after public repo creation.
+The framework intentionally does not hard-code private Claude Code or Aily runtime commands. Real platform execution is injected through benchmark `runner.command` or through platform wrappers that call the shared CLI. This keeps `core` platform-independent while preserving the required Claude Code and Aily runner paths.
