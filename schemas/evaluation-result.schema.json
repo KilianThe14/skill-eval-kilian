@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Skill Evaluation Result",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "createdAt", "target", "summary", "checks", "metrics", "artifacts"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "skill-evaluation-result" },
+    "createdAt": { "type": "string" },
+    "target": {
+      "type": "object",
+      "required": ["type", "name", "path", "entryPath"],
+      "properties": {
+        "type": { "const": "skill" },
+        "name": { "type": "string" },
+        "path": { "type": "string" },
+        "entryPath": { "type": "string" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "required": ["overallScore", "staticScore", "grade", "riskLevel", "recommendation", "topIssues"]
+    },
+    "checks": { "type": "array" },
+    "metrics": { "type": "array" },
+    "artifacts": { "type": "array" }
+  }
+}

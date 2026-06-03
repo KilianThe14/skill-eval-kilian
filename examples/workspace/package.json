@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "test": "test -f skill-output.txt"
+  }
+}

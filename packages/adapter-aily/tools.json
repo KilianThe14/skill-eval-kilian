@@ -1,0 +1,32 @@
+{
+  "tools": [
+    {
+      "name": "analyze_skill",
+      "command": "skill-eval analyze <skill-path>"
+    },
+    {
+      "name": "init_skill_benchmark",
+      "command": "skill-eval init-benchmark <skill-path> --runner aily"
+    },
+    {
+      "name": "run_skill_benchmark",
+      "command": "skill-eval run-benchmark --runner aily --config <benchmark.json>"
+    },
+    {
+      "name": "score_benchmark_result",
+      "command": "skill-eval report <benchmark-run.json>"
+    },
+    {
+      "name": "compare_skill_versions",
+      "command": "skill-eval compare <before.json> <after.json>"
+    },
+    {
+      "name": "suggest_skill_improvements",
+      "command": "skill-eval improve <result.json>"
+    },
+    {
+      "name": "generate_review_packet",
+      "command": "skill-eval review-packet <evaluation.json> <benchmark-run.json>"
+    }
+  ]
+}

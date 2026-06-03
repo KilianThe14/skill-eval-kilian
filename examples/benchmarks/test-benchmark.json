@@ -1,0 +1,56 @@
+{
+  "kind": "skill-eval-benchmark",
+  "schemaVersion": 1,
+  "target": {
+    "type": "skill",
+    "name": "sample-skill",
+    "path": "/Users/celinedon/skill-eval-kilian/examples/skills/sample-skill"
+  },
+  "runner": {
+    "type": "claude-code",
+    "command": "node /Users/celinedon/skill-eval-kilian/examples/fake-agent-runner.js"
+  },
+  "workspace": {
+    "sourcePath": "/Users/celinedon/skill-eval-kilian/examples/workspace",
+    "setupMode": "copy",
+    "preserve": "on-failure"
+  },
+  "scenarios": [
+    {
+      "id": "happy-path",
+      "title": "Happy path implementation",
+      "purpose": "Run a representative task that should clearly justify using this skill.",
+      "userInput": "Use the target skill if it helps. Complete a representative task for this skill in the current workspace and leave the result on disk.",
+      "successChecklist": [
+        "The task is completed on disk.",
+        "The final answer explains what changed.",
+        "The result stays inside the skill's intended scope."
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "follow-up",
+      "title": "Focused refinement",
+      "purpose": "Measure whether the skill can improve an existing result without restarting from scratch.",
+      "userInput": "Use the target skill if it helps. Refine or extend the current workspace with one focused follow-up improvement and finish the change end to end.",
+      "successChecklist": [
+        "The result makes a concrete change on disk.",
+        "The follow-up remains scoped and coherent.",
+        "The final answer distinguishes what was reused from what was changed."
+      ],
+      "verifiers": []
+    },
+    {
+      "id": "boundary-case",
+      "title": "Boundary handling",
+      "purpose": "Check whether the skill avoids overreaching when the task is only a partial fit.",
+      "userInput": "This task is only a partial match for the target skill. Handle the appropriate slice in the workspace and narrow or refuse the rest honestly.",
+      "successChecklist": [
+        "The run sets good boundaries instead of pretending the skill fits everything.",
+        "Any edits stay aligned with the justified scope.",
+        "The final answer explains what was handled and what was intentionally left out."
+      ],
+      "verifiers": []
+    }
+  ]
+}

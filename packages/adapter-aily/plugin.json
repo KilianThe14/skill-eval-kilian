@@ -1,0 +1,14 @@
+{
+  "name": "skill-eval-kilian",
+  "version": "0.1.0",
+  "description": "Skill-only evaluation and benchmark framework with full Aily runner capability interface.",
+  "tools": [
+    "analyze_skill",
+    "init_skill_benchmark",
+    "run_skill_benchmark",
+    "score_benchmark_result",
+    "compare_skill_versions",
+    "suggest_skill_improvements",
+    "generate_review_packet"
+  ]
+}

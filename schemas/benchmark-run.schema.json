@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Skill Benchmark Run",
+  "type": "object",
+  "required": ["schemaVersion", "kind", "createdAt", "target", "runner", "workspace", "summary", "scenarios"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "kind": { "const": "skill-benchmark-run" },
+    "createdAt": { "type": "string" },
+    "target": { "type": "object" },
+    "runner": { "type": "object" },
+    "workspace": { "type": "object" },
+    "summary": { "type": "object" },
+    "scenarios": { "type": "array" }
+  }
+}

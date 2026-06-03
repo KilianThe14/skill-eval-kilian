@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Skill Eval Benchmark",
+  "type": "object",
+  "required": ["kind", "schemaVersion", "target", "runner", "workspace", "scenarios"],
+  "properties": {
+    "kind": { "const": "skill-eval-benchmark" },
+    "schemaVersion": { "const": 1 },
+    "target": {
+      "type": "object",
+      "required": ["type", "name", "path"],
+      "properties": {
+        "type": { "const": "skill" },
+        "name": { "type": "string" },
+        "path": { "type": "string" }
+      }
+    },
+    "runner": {
+      "type": "object",
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["claude-code", "aily"] },
+        "command": { "type": ["string", "null"] }
+      }
+    },
+    "workspace": {
+      "type": "object",
+      "required": ["sourcePath", "setupMode", "preserve"]
+    },
+    "scenarios": {
+      "type": "array",
+      "minItems": 1
+    }
+  }
+}
