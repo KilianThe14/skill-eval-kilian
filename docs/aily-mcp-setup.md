@@ -56,6 +56,7 @@ MCP 返回格式：
 - `content.text` 会包含摘要、可选的 `OUTPUT_PATH_STATUS`、以及 `JSON_RESULT`。
 - Aily 后续调用应直接读取 `JSON_RESULT`，再作为 `benchmarkConfig`、`evaluationResult` 或 `benchmarkRun` 传给下一步。
 - 不要依赖 Aily 读取 `outputPath` 写出的文件，除非 MCP server 和 Aily 共享同一文件系统。
+- 使用 `skillMarkdown` 时，返回的 `target.path` 会是稳定逻辑路径，例如 `inline://sample-skill`；它不是文件系统路径，只用于标识这个内联 skill。
 
 ## 暴露的 MCP tools
 

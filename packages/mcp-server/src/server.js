@@ -44,13 +44,23 @@ function assertAllowedPath(inputPath) {
 async function materializeSkill({ skillPath, skillMarkdown, skillName = "aily-inline-skill" }) {
   if (skillMarkdown) {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "skill-eval-inline-"));
-    const skillDir = path.join(base, sanitizeName(skillName));
+    const safeName = sanitizeName(skillName);
+    const skillDir = path.join(base, safeName);
     await fs.mkdir(skillDir, { recursive: true });
     await fs.writeFile(path.join(skillDir, "SKILL.md"), skillMarkdown);
-    return skillDir;
+    return {
+      path: skillDir,
+      displayPath: `inline://${safeName}`,
+      displayEntryPath: `inline://${safeName}/SKILL.md`,
+    };
   }
   if (!skillPath) throw new Error("Provide either skillPath or skillMarkdown.");
-  return assertAllowedPath(skillPath);
+  const resolvedPath = assertAllowedPath(skillPath);
+  return {
+    path: resolvedPath,
+    displayPath: resolvedPath,
+    displayEntryPath: path.join(resolvedPath, "SKILL.md"),
+  };
 }
 
 function sanitizeName(name) {
@@ -109,6 +119,17 @@ function resultPayload(value, summary = "ok", outputPathStatus = null) {
   };
 }
 
+function withDisplayTarget(payload, skill) {
+  return {
+    ...payload,
+    target: {
+      ...payload.target,
+      path: skill.displayPath,
+      ...(payload.target?.entryPath ? { entryPath: skill.displayEntryPath } : {}),
+    },
+  };
+}
+
 function formatContentText(summary, value, outputPathStatus) {
   const summaryText = typeof summary === "string" ? summary : JSON.stringify(summary, null, 2);
   const outputText = outputPathStatus
@@ -158,7 +179,8 @@ function createMcpServer(meta = {}) {
       outputPath: z.string().optional().describe("Optional local server path to write full evaluation JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ skillPath, skillMarkdown, skillName, outputPath }) => {
-    const result = await analyzeSkill(await materializeSkill({ skillPath, skillMarkdown, skillName }));
+    const skill = await materializeSkill({ skillPath, skillMarkdown, skillName });
+    const result = withDisplayTarget(await analyzeSkill(skill.path), skill);
     const outputPathStatus = await tryWriteJson(outputPath, result);
     return resultPayload(result, `Analyzed skill ${result.target.name}. Score: ${result.summary.overallScore}. Risk: ${result.summary.riskLevel}.`, outputPathStatus);
   });
@@ -176,11 +198,12 @@ function createMcpServer(meta = {}) {
       outputPath: z.string().optional().describe("Optional local server path to write benchmark JSON. Aily sandbox paths are reported but do not fail the tool."),
     },
   }, async ({ skillPath, skillMarkdown, skillName, runner, workspacePath, command, outputPath }) => {
-    const benchmark = createStarterBenchmark(await materializeSkill({ skillPath, skillMarkdown, skillName }), {
+    const skill = await materializeSkill({ skillPath, skillMarkdown, skillName });
+    const benchmark = withDisplayTarget(createStarterBenchmark(skill.path, {
       runner,
       workspace: workspacePath ? assertAllowedPath(workspacePath) : undefined,
       command,
-    });
+    }), skill);
     const outputPathStatus = await tryWriteJson(outputPath, benchmark);
     return resultPayload(benchmark, `Created benchmark for ${benchmark.target.name} with ${benchmark.scenarios.length} starter scenarios.`, outputPathStatus);
   });

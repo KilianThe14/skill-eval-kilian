@@ -68,6 +68,8 @@ Verify the final output before responding.
       },
     });
     assert.equal(inlineResult.structuredContent.target.name, "inline-sample");
+    assert.equal(inlineResult.structuredContent.target.path, "inline://inline-sample");
+    assert.equal(inlineResult.structuredContent.target.entryPath, "inline://inline-sample/SKILL.md");
     const benchmarkResult = await client.callTool({
       name: "init_skill_benchmark",
       arguments: {
@@ -90,10 +92,12 @@ Check the result.
       },
     });
     assert.equal(benchmarkResult.structuredContent.scenarios.length, 3);
+    assert.equal(benchmarkResult.structuredContent.target.path, "inline://inline-sample");
     assert.match(benchmarkResult.content[0].text, /OUTPUT_PATH_STATUS:/);
     assert.match(benchmarkResult.content[0].text, /"written": false/);
     assert.match(benchmarkResult.content[0].text, /JSON_RESULT:/);
     assert.match(benchmarkResult.content[0].text, /"kind": "skill-eval-benchmark"/);
+    assert.doesNotMatch(benchmarkResult.content[0].text, /skill-eval-inline-/);
     await client.close();
   } finally {
     child.kill("SIGTERM");
