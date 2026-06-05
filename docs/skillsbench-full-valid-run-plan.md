@@ -4,20 +4,20 @@
 
 Run a full valid-set SkillsBench A/B experiment from the local Codex machine to compare:
 
-- `no_skill`: Claude Code ACP agent without task-level skill nudge.
-- `original_skill`: Claude Code ACP agent with original task-level skills surfaced through `BENCHFLOW_SKILL_NUDGE=description`.
+- `no_skill`: Codex agent without task-level skill nudge.
+- `original_skill`: Codex agent with original task-level skills surfaced through `BENCHFLOW_SKILL_NUDGE=description`.
 
-This run is not for `skill-eval-kilian` improvement yet. It only establishes whether original SkillsBench task-level skills improve Claude Code performance when the skills are actually surfaced.
+This run is not for `skill-eval-kilian` improvement yet. It only establishes whether original SkillsBench task-level skills improve Codex performance when the skills are actually surfaced.
 
 ## Why This Plan Changed
 
-The previous remote-machine run was blocked by company gateway limits, sandbox networking issues, and missing environment propagation. The local Codex machine will run the benchmark directly so we can inspect logs, preserve artifacts, and adapt around infra failures without losing state.
+The previous remote-machine run was blocked by company gateway limits, sandbox networking issues, and missing environment propagation. The local Codex machine will run the benchmark directly with the already-available Codex runtime, so no company gateway variables are required. Running locally also lets us inspect logs, preserve artifacts, and adapt around infra failures without losing state.
 
 Lessons from earlier runs:
 
 - A plain `original_skill` group is not enough. The agent often does not discover task-level skills unless `BENCHFLOW_SKILL_NUDGE=description` is set.
-- `bike-rebalance` is excluded because `claude-agent-acp` hit a sandbox Bash permission issue: `EACCES: permission denied, mkdir '/home/agent/.claude/session-env'`.
-- `edit-pdf` is excluded for qwen/gateway compatibility because PDF/PNG content blocks caused `API Error: 400 Unexpected item type in content`.
+- The previous `bike-rebalance` failure was specific to Claude Code ACP sandbox state. Do not pre-exclude it in the Codex run; classify any recurrence from logs.
+- The previous `edit-pdf` failure was specific to qwen/gateway content-block compatibility. Do not pre-exclude it in the Codex run; classify any recurrence from logs.
 - Verifier network failures, such as `uv` download failures, must be labeled `infra_failure`, not counted as agent failures.
 - Runs must preserve full `jobs/` directories for later diagnosis.
 
@@ -32,19 +32,13 @@ Both groups must use:
 
 - Same SkillsBench commit.
 - Same task set.
-- Same model.
-- Same gateway environment.
+- Same local Codex runtime.
 - Same sandbox backend.
 - Same concurrency.
 
 ## Task Set
 
-Use all task directories under `tasks/`, excluding known invalid-for-this-run tasks:
-
-- Exclude `bike-rebalance`.
-- Exclude `edit-pdf`.
-
-All other tasks are included in the main full valid set. Any later infra-only failures are excluded during summary, not before execution.
+Use all task directories under `tasks/`. Do not pre-exclude tasks based on the earlier qwen/Claude Code run. Any later infra-only failures are excluded during summary, not before execution.
 
 ## Required Environment
 
@@ -53,18 +47,15 @@ Required tools:
 - `git`
 - `uv`
 - `docker` or OrbStack-compatible Docker CLI
-- `claude`
+- `codex`
 
-Required environment variables:
+No company gateway environment variables are required for this local run. Do not set `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN`, or `ANTHROPIC_API_KEY` for the benchmark unless the Codex runner explicitly requires them in a later compatibility check.
 
-```bash
-export ANTHROPIC_BASE_URL="<company gateway endpoint>"
-export ANTHROPIC_AUTH_TOKEN="<api key>"
-export ANTHROPIC_API_KEY="$ANTHROPIC_AUTH_TOKEN"
-export MODEL="qwen3.7-max"
-```
+Codex auth requirement:
 
-The benchmark commands must pass gateway variables into the agent sandbox with `--agent-env`.
+- Prefer the local subscription/auth file: `~/.codex/auth.json`.
+- If the local Codex ACP runner cannot use that file, set the minimal Codex/OpenAI-compatible environment required by `codex-acp` and record it in `manifest.json`.
+- Do not write API keys into scripts, logs, markdown, or git-tracked files.
 
 ## Working Directories
 
@@ -91,12 +82,13 @@ Use a dedicated benchmark workspace outside the repo:
 
 ### 1. Preflight
 
-Verify the local machine can use the model and Docker:
+Verify the local machine can use Codex and Docker:
 
 ```bash
 docker version
 docker info
-claude -p "只回复 pong" --model "$MODEL" --output-format text
+uv --version
+codex --version
 ```
 
 ### 2. Clone And Prepare SkillsBench
@@ -125,8 +117,6 @@ mkdir -p experiments/kilian-full-valid
 
 find tasks -maxdepth 1 -mindepth 1 -type d -exec basename {} \; \
   | sort \
-  | grep -v '^bike-rebalance$' \
-  | grep -v '^edit-pdf$' \
   > experiments/kilian-full-valid/task_subset.txt
 
 rm -rf experiments/kilian-full-valid/tasks_eval
@@ -175,14 +165,12 @@ cat > "$RESULTS/manifest.json" <<EOF
 {
   "experiment": "skillsbench_full_valid_set_no_skill_vs_original_skill",
   "repo": "https://github.com/benchflow-ai/skillsbench",
-  "agent": "claude-agent-acp",
-  "model": "$MODEL",
+  "agent": "codex-acp",
+  "model": "local-codex-runtime",
   "sandbox": "docker",
   "concurrency": 1,
-  "excluded_tasks": {
-    "bike-rebalance": "Bash permission bug: EACCES mkdir /home/agent/.claude/session-env",
-    "edit-pdf": "qwen3.7-max/gateway content block API 400 on PDF/PNG"
-  },
+  "excluded_tasks": {},
+  "auth_mode": "local ~/.codex/auth.json unless codex-acp requires explicit env",
   "groups": {
     "no_skill": {
       "skills": "cleared",
@@ -207,12 +195,8 @@ cd "$BASE/skillsbench-no-skill"
 
 uv run bench eval create \
   --tasks-dir experiments/kilian-full-valid/tasks_eval \
-  --agent claude-agent-acp \
-  --model "$MODEL" \
+  --agent codex-acp \
   --sandbox docker \
-  --agent-env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
-  --agent-env "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" \
-  --agent-env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
   --concurrency 1 \
   --jobs-dir "$RESULTS/no_skill/jobs" \
   2>&1 | tee "$RESULTS/no_skill/run.log"
@@ -225,12 +209,8 @@ cd "$BASE/skillsbench-original-skill"
 
 uv run bench eval create \
   --tasks-dir experiments/kilian-full-valid/tasks_eval \
-  --agent claude-agent-acp \
-  --model "$MODEL" \
+  --agent codex-acp \
   --sandbox docker \
-  --agent-env "ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL" \
-  --agent-env "ANTHROPIC_AUTH_TOKEN=$ANTHROPIC_AUTH_TOKEN" \
-  --agent-env "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" \
   --agent-env "BENCHFLOW_SKILL_NUDGE=description" \
   --concurrency 1 \
   --jobs-dir "$RESULTS/original_skill/jobs" \
@@ -242,7 +222,7 @@ uv run bench eval create \
 Create a summary script that:
 
 - Reads all `result.json` files.
-- Labels Docker/network/gateway/verifier-only failures as `infra_failure`.
+- Labels Docker/network/runtime/verifier-only failures as `infra_failure`.
 - Computes valid-run success rate and average reward after excluding infra failures.
 - Records skill mentions in logs.
 - Writes:
@@ -261,7 +241,7 @@ Classify as `infra_failure` when logs include:
 - verifier setup failure before tests run.
 - `API Error: 400 Unexpected item type in content`.
 - `EACCES mkdir /home/agent/.claude/session-env`.
-- authentication/gateway failures unrelated to task reasoning.
+- authentication/runtime failures unrelated to task reasoning.
 
 Do not delete `jobs/`. If a run stops halfway, preserve completed jobs and continue with a remaining-task subset.
 
@@ -283,7 +263,7 @@ Before starting the full run, perform local preflight:
 docker version
 docker info
 uv --version
-claude -p "只回复 pong" --model "$MODEL" --output-format text
+codex --version
 ```
 
 If preflight passes, start the full run with `concurrency=1`.
