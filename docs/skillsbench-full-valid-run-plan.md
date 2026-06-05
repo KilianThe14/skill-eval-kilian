@@ -20,6 +20,7 @@ Lessons from earlier runs:
 - The previous `edit-pdf` failure was specific to qwen/gateway content-block compatibility. Do not pre-exclude it in the Codex run; classify any recurrence from logs.
 - Verifier network failures, such as `uv` download failures, must be labeled `infra_failure`, not counted as agent failures.
 - Runs must preserve full `jobs/` directories for later diagnosis.
+- Some SkillsBench Dockerfiles use `/root` as `WORKDIR`, while BenchFlow uploads skills to `/app/skills`. Before running, patch the copied `tasks_eval` Dockerfiles to create `/app /app/skills`; this is sandbox compatibility, not task logic modification.
 
 ## Experiment Design
 
@@ -32,7 +33,7 @@ Both groups must use:
 
 - Same SkillsBench commit.
 - Same task set.
-- Same local Codex runtime.
+- Same local Codex runtime and explicit Codex model.
 - Same sandbox backend.
 - Same concurrency.
 
@@ -56,6 +57,12 @@ Codex auth requirement:
 - Prefer the local subscription/auth file: `~/.codex/auth.json`.
 - If the local Codex ACP runner cannot use that file, set the minimal Codex/OpenAI-compatible environment required by `codex-acp` and record it in `manifest.json`.
 - Do not write API keys into scripts, logs, markdown, or git-tracked files.
+
+Codex model requirement:
+
+- Pass `--model gpt-5.5` to `bench eval create`.
+- Without an explicit model, BenchFlow currently falls back to its default Claude model and asks for `ANTHROPIC_API_KEY`, which is not the intended local Codex run.
+- For direct Codex CLI smoke tests, override the local config service tier with `-c service_tier='"fast"'` if the installed CLI rejects the configured service tier.
 
 ## Working Directories
 
@@ -89,6 +96,7 @@ docker version
 docker info
 uv --version
 codex --version
+codex exec -c service_tier='"fast"' -m gpt-5.5 --skip-git-repo-check --sandbox read-only --output-last-message /tmp/codex_smoke.txt "只回复 pong"
 ```
 
 ### 2. Clone And Prepare SkillsBench
@@ -156,6 +164,26 @@ cp -R "$REPO/experiments/kilian-full-valid" experiments/kilian-full-valid
 uv sync --locked
 ```
 
+### 4.1 Patch Local Docker Compatibility
+
+BenchFlow uploads skill files to `/app/skills`. Some tasks run from `/root` and do not create `/app`, which causes Docker `cp` failures before the agent starts. Patch only the copied experiment task set:
+
+```bash
+patch_task_dockerfiles() {
+  local tasks_dir="$1"
+  find "$tasks_dir" -path '*/environment/Dockerfile' -type f -exec sh -c '
+    for file do
+      if ! grep -q "# Skill Eval local compatibility" "$file"; then
+        printf "\n# Skill Eval local compatibility: BenchFlow uploads skill files here.\nRUN mkdir -p /app /app/skills\n" >> "$file"
+      fi
+    done
+  ' sh {} +
+}
+
+patch_task_dockerfiles "$BASE/skillsbench-no-skill/experiments/kilian-full-valid/tasks_eval"
+patch_task_dockerfiles "$BASE/skillsbench-original-skill/experiments/kilian-full-valid/tasks_eval"
+```
+
 ### 5. Write Manifest
 
 ```bash
@@ -166,11 +194,12 @@ cat > "$RESULTS/manifest.json" <<EOF
   "experiment": "skillsbench_full_valid_set_no_skill_vs_original_skill",
   "repo": "https://github.com/benchflow-ai/skillsbench",
   "agent": "codex-acp",
-  "model": "local-codex-runtime",
+  "model": "gpt-5.5",
   "sandbox": "docker",
   "concurrency": 1,
   "excluded_tasks": {},
   "auth_mode": "local ~/.codex/auth.json unless codex-acp requires explicit env",
+  "sandbox_compat_patch": "copied task Dockerfiles ensure /app and /app/skills exist for BenchFlow skill upload",
   "groups": {
     "no_skill": {
       "skills": "cleared",
@@ -196,6 +225,7 @@ cd "$BASE/skillsbench-no-skill"
 uv run bench eval create \
   --tasks-dir experiments/kilian-full-valid/tasks_eval \
   --agent codex-acp \
+  --model gpt-5.5 \
   --sandbox docker \
   --concurrency 1 \
   --jobs-dir "$RESULTS/no_skill/jobs" \
@@ -210,6 +240,7 @@ cd "$BASE/skillsbench-original-skill"
 uv run bench eval create \
   --tasks-dir experiments/kilian-full-valid/tasks_eval \
   --agent codex-acp \
+  --model gpt-5.5 \
   --sandbox docker \
   --agent-env "BENCHFLOW_SKILL_NUDGE=description" \
   --concurrency 1 \
@@ -237,6 +268,7 @@ Classify as `infra_failure` when logs include:
 
 - Docker registry failures.
 - `uv` download failures.
+- Docker `cp` failure caused by missing `/app` before the compatibility patch.
 - `uvx: command not found`.
 - verifier setup failure before tests run.
 - `API Error: 400 Unexpected item type in content`.
@@ -264,6 +296,7 @@ docker version
 docker info
 uv --version
 codex --version
+codex exec -c service_tier='"fast"' -m gpt-5.5 --skip-git-repo-check --sandbox read-only --output-last-message /tmp/codex_smoke.txt "只回复 pong"
 ```
 
 If preflight passes, start the full run with `concurrency=1`.
